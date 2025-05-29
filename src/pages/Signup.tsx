@@ -6,6 +6,9 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Link, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { useEffect } from "react";
 
 const Signup = () => {
   const [name, setName] = useState("");
@@ -15,6 +18,13 @@ const Signup = () => {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user } = useAuth();
+
+  useEffect(() => {
+    if (user) {
+      navigate("/dashboard");
+    }
+  }, [user, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,24 +40,39 @@ const Signup = () => {
       return;
     }
 
-    // Simulação de cadastro
-    setTimeout(() => {
-      if (name && email && password) {
-        localStorage.setItem("user", JSON.stringify({ email, name }));
-        toast({
-          title: "Cadastro realizado com sucesso!",
-          description: "Bem-vindo ao NotesApp. Sua conta foi criada.",
-        });
-        navigate("/dashboard");
-      } else {
+    try {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            name: name,
+          },
+        },
+      });
+
+      if (error) {
         toast({
           title: "Erro no cadastro",
-          description: "Por favor, preencha todos os campos.",
+          description: error.message,
           variant: "destructive",
         });
+      } else {
+        toast({
+          title: "Cadastro realizado com sucesso!",
+          description: "Verifique seu email para confirmar a conta.",
+        });
+        navigate("/login");
       }
+    } catch (error) {
+      toast({
+        title: "Erro no cadastro",
+        description: "Ocorreu um erro inesperado. Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   return (

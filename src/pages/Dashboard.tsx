@@ -8,40 +8,82 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { useNavigate } from "react-router-dom";
-import { Plus, CheckCircle, Circle, Calendar, User, LogOut } from "lucide-react";
+import { Plus, CheckCircle, Circle, Calendar, User, LogOut, Edit } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 
 interface Note {
   id: string;
   title: string;
   content: string;
   completed: boolean;
-  createdAt: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface Profile {
+  id: string;
+  name: string;
+  email: string;
 }
 
 const Dashboard = () => {
   const [notes, setNotes] = useState<Note[]>([]);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [newNote, setNewNote] = useState({ title: "", content: "" });
+  const [editingNote, setEditingNote] = useState<Note | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [user, setUser] = useState<any>(null);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
   const { toast } = useToast();
-  const navigate = useNavigate();
+  const { user, signOut } = useAuth();
 
   useEffect(() => {
-    const userData = localStorage.getItem("user");
-    if (!userData) {
-      navigate("/login");
-      return;
+    if (user) {
+      fetchProfile();
+      fetchNotes();
     }
-    setUser(JSON.parse(userData));
+  }, [user]);
 
-    const savedNotes = localStorage.getItem("notes");
-    if (savedNotes) {
-      setNotes(JSON.parse(savedNotes));
+  const fetchProfile = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user?.id)
+        .single();
+
+      if (error) throw error;
+      setProfile(data);
+    } catch (error) {
+      console.error('Error fetching profile:', error);
     }
-  }, [navigate]);
+  };
 
-  const handleAddNote = () => {
+  const fetchNotes = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('notes')
+        .select('*')
+        .eq('user_id', user?.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setNotes(data || []);
+    } catch (error) {
+      console.error('Error fetching notes:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível carregar as notas.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddNote = async () => {
     if (!newNote.title.trim()) {
       toast({
         title: "Erro",
@@ -51,50 +93,113 @@ const Dashboard = () => {
       return;
     }
 
-    const note: Note = {
-      id: Date.now().toString(),
-      title: newNote.title,
-      content: newNote.content,
-      completed: false,
-      createdAt: new Date().toISOString(),
-    };
+    try {
+      const { data, error } = await supabase
+        .from('notes')
+        .insert({
+          title: newNote.title,
+          content: newNote.content,
+          user_id: user?.id,
+        })
+        .select()
+        .single();
 
-    const updatedNotes = [...notes, note];
-    setNotes(updatedNotes);
-    localStorage.setItem("notes", JSON.stringify(updatedNotes));
+      if (error) throw error;
 
-    setNewNote({ title: "", content: "" });
-    setIsDialogOpen(false);
+      setNotes([data, ...notes]);
+      setNewNote({ title: "", content: "" });
+      setIsDialogOpen(false);
 
-    toast({
-      title: "Nota criada!",
-      description: "Sua nova nota foi adicionada com sucesso.",
-    });
+      toast({
+        title: "Nota criada!",
+        description: "Sua nova nota foi adicionada com sucesso.",
+      });
+    } catch (error) {
+      console.error('Error creating note:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível criar a nota.",
+        variant: "destructive",
+      });
+    }
   };
 
-  const toggleNoteCompletion = (id: string) => {
-    const updatedNotes = notes.map(note => {
-      if (note.id === id) {
-        const completed = !note.completed;
-        if (completed) {
-          // Simular envio de email
-          toast({
-            title: "Nota finalizada! 📧",
-            description: "Um email de confirmação foi enviado para você.",
-          });
-        }
-        return { ...note, completed };
+  const handleEditNote = async () => {
+    if (!editingNote || !editingNote.title.trim()) {
+      toast({
+        title: "Erro",
+        description: "Por favor, adicione um título à nota.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('notes')
+        .update({
+          title: editingNote.title,
+          content: editingNote.content,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', editingNote.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setNotes(notes.map(note => note.id === editingNote.id ? data : note));
+      setEditingNote(null);
+      setIsEditDialogOpen(false);
+
+      toast({
+        title: "Nota atualizada!",
+        description: "Sua nota foi editada com sucesso.",
+      });
+    } catch (error) {
+      console.error('Error updating note:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível atualizar a nota.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const toggleNoteCompletion = async (noteId: string, completed: boolean) => {
+    try {
+      const { data, error } = await supabase
+        .from('notes')
+        .update({ 
+          completed: !completed,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', noteId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setNotes(notes.map(note => note.id === noteId ? data : note));
+
+      if (!completed) {
+        toast({
+          title: "Nota finalizada! 📧",
+          description: "Um email de confirmação foi enviado para você.",
+        });
       }
-      return note;
-    });
-
-    setNotes(updatedNotes);
-    localStorage.setItem("notes", JSON.stringify(updatedNotes));
+    } catch (error) {
+      console.error('Error updating note:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível atualizar a nota.",
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("user");
-    navigate("/");
+  const handleLogout = async () => {
+    await signOut();
   };
 
   const formatDate = (dateString: string) => {
@@ -105,8 +210,20 @@ const Dashboard = () => {
     });
   };
 
-  if (!user) {
-    return null;
+  const openEditDialog = (note: Note) => {
+    setEditingNote({ ...note });
+    setIsEditDialogOpen(true);
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Carregando suas notas...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -124,7 +241,7 @@ const Dashboard = () => {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 text-gray-600">
               <User className="w-4 h-4" />
-              <span className="hidden sm:inline">{user.name}</span>
+              <span className="hidden sm:inline">{profile?.name || 'Usuário'}</span>
             </div>
             <Button
               variant="outline"
@@ -143,7 +260,7 @@ const Dashboard = () => {
         {/* Welcome Section */}
         <div className="mb-8">
           <h2 className="text-3xl font-bold text-gray-800 mb-2">
-            Bem-vindo de volta, {user.name}! 👋
+            Bem-vindo de volta, {profile?.name || 'Usuário'}! 👋
           </h2>
           <p className="text-gray-600">
             Organize seus projetos e acompanhe o progresso das suas tarefas.
@@ -242,6 +359,47 @@ const Dashboard = () => {
           </Dialog>
         </div>
 
+        {/* Edit Note Dialog */}
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Editar Nota</DialogTitle>
+              <DialogDescription>
+                Faça as alterações necessárias na sua nota.
+              </DialogDescription>
+            </DialogHeader>
+            
+            {editingNote && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-title">Título</Label>
+                  <Input
+                    id="edit-title"
+                    placeholder="Digite o título da nota..."
+                    value={editingNote.title}
+                    onChange={(e) => setEditingNote({ ...editingNote, title: e.target.value })}
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="edit-content">Conteúdo</Label>
+                  <Textarea
+                    id="edit-content"
+                    placeholder="Descreva os detalhes do seu projeto..."
+                    value={editingNote.content || ''}
+                    onChange={(e) => setEditingNote({ ...editingNote, content: e.target.value })}
+                    rows={4}
+                  />
+                </div>
+                
+                <Button onClick={handleEditNote} className="w-full bg-blue-600 hover:bg-blue-700">
+                  Salvar Alterações
+                </Button>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
         {/* Notes Grid */}
         {notes.length === 0 ? (
           <Card className="text-center py-12">
@@ -269,24 +427,38 @@ const Dashboard = () => {
             {notes.map((note) => (
               <Card
                 key={note.id}
-                className={`cursor-pointer transition-all hover:shadow-lg ${
+                className={`transition-all hover:shadow-lg ${
                   note.completed ? "bg-green-50 border-green-200" : "bg-white"
                 }`}
-                onClick={() => toggleNoteCompletion(note.id)}
               >
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between">
                     <CardTitle className={`text-lg ${note.completed ? "line-through text-green-700" : "text-gray-800"}`}>
                       {note.title}
                     </CardTitle>
-                    {note.completed ? (
-                      <CheckCircle className="w-6 h-6 text-green-600 flex-shrink-0" />
-                    ) : (
-                      <Circle className="w-6 h-6 text-gray-400 flex-shrink-0" />
-                    )}
+                    <div className="flex gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openEditDialog(note)}
+                        className="h-8 w-8 p-0"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </Button>
+                      <button
+                        onClick={() => toggleNoteCompletion(note.id, note.completed)}
+                        className="flex-shrink-0"
+                      >
+                        {note.completed ? (
+                          <CheckCircle className="w-6 h-6 text-green-600" />
+                        ) : (
+                          <Circle className="w-6 h-6 text-gray-400" />
+                        )}
+                      </button>
+                    </div>
                   </div>
                   <CardDescription className="text-sm text-gray-500">
-                    Criada em {formatDate(note.createdAt)}
+                    Criada em {formatDate(note.created_at)}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
