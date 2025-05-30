@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -182,10 +181,46 @@ const Dashboard = () => {
 
       setNotes(notes.map(note => note.id === noteId ? data : note));
 
+      // Se a tarefa foi marcada como concluída, enviar para N8N
       if (!completed) {
+        try {
+          const webhookUrl = "https://v1toor.app.n8n.cloud/webhook-test/testevictor";
+          
+          const response = await fetch(webhookUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              taskId: noteId,
+              title: data.title,
+              content: data.content,
+              completedAt: new Date().toISOString(),
+              userId: user?.id,
+              userEmail: user?.email,
+              userName: profile?.name,
+            }),
+          });
+
+          console.log("Webhook N8N enviado:", response.status);
+
+          toast({
+            title: "Nota finalizada! ✅",
+            description: "Tarefa concluída e notificação enviada para N8N.",
+          });
+        } catch (webhookError) {
+          console.error("Erro ao enviar webhook para N8N:", webhookError);
+          
+          toast({
+            title: "Nota finalizada! ⚠️",
+            description: "Tarefa concluída, mas houve erro ao enviar notificação.",
+            variant: "destructive",
+          });
+        }
+      } else {
         toast({
-          title: "Nota finalizada! 📧",
-          description: "Um email de confirmação foi enviado para você.",
+          title: "Nota reaberta",
+          description: "A tarefa foi marcada como pendente novamente.",
         });
       }
     } catch (error) {
